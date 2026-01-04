@@ -1,0 +1,9 @@
+[project]
+name = "range-bot"
+version = "0.1.0"
+description = "Bayesian LP range optimization for Uniswap v3"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.32.5",
+]

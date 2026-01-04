@@ -60,15 +60,13 @@ src/
     fetchers/
       __init__.py
       base.py         # Abstract fetcher protocol
-      flipside.py     # Flipside Crypto API fetcher
       rpc.py          # Direct RPC fetcher (eth_call, eth_getLogs)
-      subgraph.py     # Uniswap subgraph fetcher
     storage/
       __init__.py
       base.py         # Abstract storage protocol
       sqlite.py       # Local SQLite for dev/testing
-      s3.py           # S3/R2 for production cold storage
-      timescale.py    # TimescaleDB for production hot queries
+      json_store.py   # Simple JSON file storage
+      s3.py           # S3 for production cold storage
     aggregators.py    # Pure functions: raw events -> OHLC
     backfill.py       # Historical data backfill orchestration
 ```
@@ -172,30 +170,22 @@ Fetchers and storage are the only modules that perform I/O. All other modules ar
 python = "^3.11"
 
 # Data
-web3 = "^6.0"           # RPC calls
-httpx = "^0.25"         # Async HTTP for APIs
-pandas = "^2.0"         # Data manipulation (optional, for analysis)
+requests = "^2.32"      # HTTP for RPC calls
 
-# Storage
-boto3 = "^1.28"         # S3/R2
-sqlalchemy = "^2.0"     # SQLite/Postgres
-
-# FP utilities
-returns = "^0.22"       # Result/Maybe types (optional)
+# Storage (optional, for production)
+boto3 = "^1.28"         # S3
 ```
 
 ## Acceptance Criteria
 
-- [ ] All data types defined as frozen dataclasses
-- [ ] At least one fetcher implemented (Flipside or RPC)
-- [ ] SQLite storage adapter working for local dev
+- [x] All data types defined as frozen dataclasses
+- [x] RPC fetcher implemented (see poc/simple_poc.py)
+- [ ] JSON storage adapter working for local dev
 - [ ] Backfill script can populate 10,000 blocks
 - [ ] 90%+ unit test coverage on pure functions
 - [ ] Integration test passes against mainnet historical data
-- [ ] README with usage examples
 
 ## References
 
 - [Uniswap v3 Core](https://github.com/Uniswap/v3-core)
 - [onchain-pricing repo](https://github.com/charliemarketplace/onchain-pricing)
-- [Flipside API docs](https://docs.flipsidecrypto.com/)

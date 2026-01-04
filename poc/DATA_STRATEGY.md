@@ -292,24 +292,25 @@ async def get_data_with_fallback():
 
 ## Testing the Strategy
 
-Run these POC scripts locally:
+Run the POC locally:
 
 ```bash
-# 1. Test RPC endpoints
-python poc/01_test_rpc.py
-
-# 2. Test subgraph queries
-python poc/02_test_subgraph.py
-
-# 3. Test historical data fetching
-python poc/03_test_rpc_historical.py
+uv run python poc/simple_poc.py
 ```
+
+This fetches real swap data from Ethereum mainnet, stores locally, and runs Bayesian analysis.
+
+Output files:
+- `poc/data/swaps.json` - Raw swap events
+- `poc/data/ohlc.json` - Aggregated candles
+- `poc/data/results.json` - Analysis results
 
 ## Next Steps
 
-1. [ ] Get Alchemy/Infura API keys (free tier)
-2. [ ] Get The Graph API key + fund with $1 GRT
-3. [ ] Run backfill script for last 30 days of data
-4. [ ] Set up SQLite schema locally
-5. [ ] Verify OHLC computation against known prices
+1. [x] Test RPC endpoints (PublicNode works)
+2. [x] Fetch real swap data
+3. [x] Compute OHLC and VWAP
+4. [x] Run Bayesian analysis
+5. [ ] Set up SQLite schema for persistent storage
 6. [ ] Implement fallback logic
+7. [ ] Add Base chain support
