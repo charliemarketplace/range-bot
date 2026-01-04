@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Range Bot - Bayesian LP Optimizer</title>
+  <script src="https://code.highcharts.com/stock/highstock.js"></script>
+  <script src="https://code.highcharts.com/stock/highcharts-more.js"></script>
+  <script src="https://code.highcharts.com/modules/exporting.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      margin: 0;
+      padding: 24px;
+      background: linear-gradient(180deg, #0d1117 0%, #161b22 100%);
+      min-height: 100vh;
+      color: #e6edf3;
+    }
+    .container { max-width: 1400px; margin: 0 auto; }
+    .header { margin-bottom: 20px; }
+    h1 {
+      font-size: 1.4rem;
+      margin: 0 0 6px;
+      color: #fff;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    .subtitle { font-size: 0.8rem; color: #7d8590; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .stats-row-2 {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .stat {
+      background: rgba(22, 27, 34, 0.8);
+      backdrop-filter: blur(8px);
+      padding: 14px 16px;
+      border-radius: 10px;
+      border: 1px solid rgba(48, 54, 61, 0.6);
+    }
+    .stat-label {
+      font-size: 0.65rem;
+      color: #7d8590;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+    .stat-value {
+      font-size: 1.1rem;
+      color: #fff;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+    .stat-sub {
+      font-size: 0.7rem;
+      color: #7d8590;
+      margin-top: 2px;
+    }
+    .stat-value.positive { color: #3fb950; }
+    .stat-value.negative { color: #f85149; }
+    .stat-value.highlight { color: #58a6ff; }
+    #chart-wrapper {
+      background: rgba(22, 27, 34, 0.6);
+      border-radius: 14px;
+      border: 1px solid rgba(48, 54, 61, 0.6);
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    #chart { height: 420px; }
+    .chart-controls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(48, 54, 61, 0.4);
+    }
+    .chart-title { font-size: 0.85rem; font-weight: 600; color: #e6edf3; }
+    .chart-hint { font-size: 0.7rem; color: #7d8590; }
+    .method-box {
+      background: rgba(22, 27, 34, 0.6);
+      border: 1px solid rgba(48, 54, 61, 0.6);
+      border-radius: 10px;
+      padding: 16px 18px;
+    }
+    .method-title {
+      font-size: 0.7rem;
+      color: #7d8590;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+      font-weight: 500;
+    }
+    .method-content {
+      font-size: 0.8rem;
+      line-height: 1.65;
+      color: #c9d1d9;
+    }
+    .method-content strong { color: #f0883e; font-weight: 500; }
+    .method-content code {
+      background: rgba(110, 118, 129, 0.2);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-family: 'SF Mono', Monaco, monospace;
+      color: #58a6ff;
+    }
+    .formula {
+      background: rgba(88, 166, 255, 0.08);
+      border: 1px solid rgba(88, 166, 255, 0.2);
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin: 10px 0;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 0.8rem;
+      color: #58a6ff;
+      text-align: center;
+    }
+    .footer {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(48, 54, 61, 0.4);
+      font-size: 0.7rem;
+      color: #7d8590;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .footer a { color: #58a6ff; text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+    .footer code {
+      background: rgba(110, 118, 129, 0.2);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.65rem;
+      font-family: 'SF Mono', Monaco, monospace;
+    }
+    #error {
+      background: rgba(248, 81, 73, 0.1);
+      border: 1px solid rgba(248, 81, 73, 0.4);
+      border-radius: 10px;
+      padding: 20px;
+      display: none;
+      color: #f85149;
+    }
+    #error code {
+      background: rgba(110, 118, 129, 0.2);
+      padding: 6px 10px;
+      border-radius: 6px;
+      display: inline-block;
+      margin: 10px 0;
+      font-family: 'SF Mono', Monaco, monospace;
+      color: #e6edf3;
+    }
+    @media (max-width: 900px) {
+      .stats, .stats-row-2 { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>ETH/USDC 0.05% Pool - Bayesian Range Optimizer</h1>
+      <div class="subtitle">Uniswap v3 | Ethereum Mainnet | 1 block ~ 12 seconds</div>
+    </div>
+
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-label">Current Price</div>
+        <div class="stat-value" id="current">-</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">VWAP (50 min)</div>
+        <div class="stat-value" id="vwap">-</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Optimal Range (90%)</div>
+        <div class="stat-value highlight" id="range">-</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Position Status</div>
+        <div class="stat-value" id="status">-</div>
+      </div>
+    </div>
+
+    <div class="stats-row-2">
+      <div class="stat">
+        <div class="stat-label">Min Block</div>
+        <div class="stat-value" id="minBlock">-</div>
+        <div class="stat-sub" id="minTime">-</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Max Block</div>
+        <div class="stat-value" id="maxBlock">-</div>
+        <div class="stat-sub" id="maxTime">-</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Candles</div>
+        <div class="stat-value" id="candleCount">-</div>
+        <div class="stat-sub" id="candleInfo">-</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Swaps</div>
+        <div class="stat-value" id="swapCount">-</div>
+        <div class="stat-sub" id="swapInfo">-</div>
+      </div>
+    </div>
+
+    <div id="error"></div>
+
+    <div id="chart-wrapper">
+      <div class="chart-controls">
+        <div class="chart-title">Price Action & Bayesian Range</div>
+        <div class="chart-hint">Drag to zoom | Shift+drag to pan | Double-click to reset</div>
+      </div>
+      <div id="chart"></div>
+    </div>
+
+    <div class="method-box">
+      <div class="method-title">Bayesian Update Method</div>
+      <div class="method-content">
+        <strong>1. Prior Distribution:</strong> Laplace distribution centered on the rolling median VWAP (last 10 candles = 50 min).
+        Scale parameter = 2x standard deviation of VWAP values. Research shows price revisits VWAP 90%+ of the time within ~1000 blocks.<br><br>
+
+        <strong>2. Likelihood Function:</strong> Built from OHLC candles. For each price point, probability is weighted sum of candles where <code>low &lt;= price &lt;= high</code>.
+        Recent candles weighted higher (decay factor 0.9 per candle).<br><br>
+
+        <strong>3. Posterior:</strong> Element-wise multiplication of prior and likelihood, then normalize.
+        <div class="formula">P(price | data) &prop; P(price) &times; L(data | price)</div>
+
+        <strong>4. Optimal Range:</strong> Find the tightest interval covering 90% of posterior probability mass.
+        This becomes the recommended LP tick range for Uniswap v3.
+      </div>
+    </div>
+
+    <div class="footer">
+      <div>Pool <code>0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640</code></div>
+      <div><a href="https://flipsidecrypto.beehiiv.com/p/onchain-pricing" target="_blank">VWAP Research</a></div>
+    </div>
+  </div>
+
+  <script>
+    async function loadData() {
+      try {
+        const [ohlc, results, swaps] = await Promise.all([
+          fetch('data/ohlc.json').then(r => { if (!r.ok) throw new Error(); return r.json(); }),
+          fetch('data/results.json').then(r => { if (!r.ok) throw new Error(); return r.json(); }),
+          fetch('data/swaps.json').then(r => { if (!r.ok) throw new Error(); return r.json(); })
+        ]);
+        return { ohlc, results, swaps };
+      } catch (e) {
+        if (typeof INLINE_DATA !== 'undefined') return INLINE_DATA;
+        throw new Error('Data not available');
+      }
+    }
+
+    function formatTime(ts) {
+      const d = new Date(ts);
+      return d.toISOString().slice(11, 19) + ' UTC';
+    }
+
+    function formatNumber(n) {
+      return n.toLocaleString();
+    }
+
+    async function render() {
+      let data;
+      try {
+        data = await loadData();
+      } catch (e) {
+        document.getElementById('error').style.display = 'block';
+        document.getElementById('error').innerHTML = `
+          <strong>Data not loaded</strong><br><br>
+          Run: <code>cd poc && python -m http.server 8000</code><br><br>
+          Then open: <a href="http://localhost:8000/viewer.html" style="color:#58a6ff">http://localhost:8000/viewer.html</a>
+        `;
+        return;
+      }
+
+      const { ohlc, results, swaps } = data;
+
+      // Price stats
+      document.getElementById('current').textContent = '$' + results.current_price.toFixed(2);
+      document.getElementById('vwap').textContent = '$' + results.median_vwap.toFixed(2);
+      document.getElementById('range').textContent = '$' + results.range.lower.toFixed(2) + ' - $' + results.range.upper.toFixed(2);
+
+      const statusEl = document.getElementById('status');
+      statusEl.textContent = results.in_range ? 'IN RANGE' : 'OUT OF RANGE';
+      statusEl.className = 'stat-value ' + (results.in_range ? 'positive' : 'negative');
+
+      // Data coverage stats
+      const minBlock = Math.min(...swaps.map(s => s.block));
+      const maxBlock = Math.max(...swaps.map(s => s.block));
+      const minTs = Math.min(...swaps.map(s => s.timestamp)) * 1000;
+      const maxTs = Math.max(...swaps.map(s => s.timestamp)) * 1000;
+
+      document.getElementById('minBlock').textContent = formatNumber(minBlock);
+      document.getElementById('minTime').textContent = formatTime(minTs);
+      document.getElementById('maxBlock').textContent = formatNumber(maxBlock);
+      document.getElementById('maxTime').textContent = formatTime(maxTs);
+      document.getElementById('candleCount').textContent = ohlc.length;
+      document.getElementById('candleInfo').textContent = (results.candle_minutes || 5) + ' min each';
+      document.getElementById('swapCount').textContent = formatNumber(swaps.length);
+      document.getElementById('swapInfo').textContent = formatNumber(maxBlock - minBlock) + ' blocks';
+
+      // Chart data
+      const ohlcData = ohlc.map(c => [c.timestamp, c.o, c.h, c.l, c.c]);
+      const swapData = swaps.map(s => [s.timestamp * 1000, s.price]);
+      const vwapData = ohlc.map(c => [c.timestamp, c.vwap]);
+
+      Highcharts.stockChart('chart', {
+        chart: {
+          backgroundColor: 'transparent',
+          style: { fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' },
+          zoomType: 'x',
+          panning: { enabled: true, type: 'x' },
+          panKey: 'shift',
+          resetZoomButton: {
+            theme: {
+              fill: '#21262d',
+              stroke: '#30363d',
+              style: { color: '#e6edf3' },
+              r: 6
+            },
+            position: { y: -40 }
+          },
+          events: {
+            load: function() {
+              this.container.ondblclick = () => this.zoomOut();
+            }
+          }
+        },
+        credits: { enabled: false },
+        navigator: { enabled: false },
+        scrollbar: { enabled: false },
+        rangeSelector: { enabled: false },
+        title: { text: null },
+
+        xAxis: {
+          type: 'datetime',
+          labels: {
+            style: { color: '#7d8590', fontSize: '0.7rem' },
+            format: '{value:%H:%M}'
+          },
+          dateTimeLabelFormats: {
+            minute: '%H:%M',
+            hour: '%H:%M',
+            day: '%b %e'
+          },
+          gridLineColor: 'rgba(48, 54, 61, 0.4)',
+          gridLineWidth: 1,
+          lineColor: 'rgba(48, 54, 61, 0.6)',
+          tickColor: 'rgba(48, 54, 61, 0.6)',
+          crosshair: {
+            color: 'rgba(88, 166, 255, 0.2)',
+            width: 1
+          },
+          minPadding: 0.01,
+          maxPadding: 0.01
+        },
+
+        yAxis: {
+          labels: {
+            style: { color: '#7d8590', fontSize: '0.7rem' },
+            format: '${value:,.0f}',
+            x: -6
+          },
+          gridLineColor: 'rgba(48, 54, 61, 0.3)',
+          title: { text: null },
+          plotBands: [{
+            from: results.range.lower,
+            to: results.range.upper,
+            color: 'rgba(88, 166, 255, 0.06)',
+            label: {
+              text: '90% Range',
+              style: { color: 'rgba(88, 166, 255, 0.7)', fontSize: '0.65rem' },
+              align: 'right',
+              x: -6,
+              y: 12
+            }
+          }],
+          plotLines: [
+            {
+              value: results.median_vwap,
+              color: 'rgba(240, 136, 62, 0.7)',
+              width: 1,
+              dashStyle: 'Dash',
+              zIndex: 4,
+              label: {
+                text: 'VWAP',
+                style: { color: '#f0883e', fontSize: '0.65rem' },
+                align: 'right',
+                x: -6
+              }
+            },
+            {
+              value: results.current_price,
+              color: results.in_range ? '#3fb950' : '#f85149',
+              width: 2,
+              zIndex: 5,
+              label: {
+                text: 'Now',
+                style: { color: results.in_range ? '#3fb950' : '#f85149', fontSize: '0.65rem' },
+                align: 'right',
+                x: -6
+              }
+            }
+          ],
+          crosshair: {
+            color: 'rgba(88, 166, 255, 0.2)'
+          }
+        },
+
+        tooltip: {
+          shared: true,
+          useHTML: true,
+          backgroundColor: 'rgba(22, 27, 34, 0.95)',
+          borderColor: 'rgba(48, 54, 61, 0.8)',
+          borderRadius: 6,
+          shadow: false,
+          style: { color: '#e6edf3', fontSize: '0.75rem' },
+          headerFormat: '<div style="font-weight:600;margin-bottom:6px;color:#fff;font-size:0.8rem">{point.x:%H:%M:%S UTC}</div>',
+          pointFormatter: function() {
+            if (this.series.name === 'OHLC') {
+              const change = ((this.close - this.open) / this.open * 100).toFixed(3);
+              const changeColor = this.close >= this.open ? '#3fb950' : '#f85149';
+              return '<div style="display:grid;grid-template-columns:auto auto;gap:2px 10px;margin:4px 0">' +
+                '<span style="color:#7d8590">O</span><span>$' + this.open.toFixed(2) + '</span>' +
+                '<span style="color:#7d8590">H</span><span>$' + this.high.toFixed(2) + '</span>' +
+                '<span style="color:#7d8590">L</span><span>$' + this.low.toFixed(2) + '</span>' +
+                '<span style="color:#7d8590">C</span><span>$' + this.close.toFixed(2) + '</span>' +
+                '</div><div style="color:' + changeColor + ';margin-top:4px">' + (change >= 0 ? '+' : '') + change + '%</div>';
+            } else if (this.series.name === 'VWAP') {
+              return '<div style="margin:2px 0"><span style="color:#f0883e">VWAP</span> $' + this.y.toFixed(2) + '</div>';
+            }
+            return '';
+          }
+        },
+
+        plotOptions: {
+          series: {
+            animation: { duration: 300 },
+            states: {
+              hover: { lineWidthPlus: 0 },
+              inactive: { opacity: 0.4 }
+            }
+          },
+          candlestick: {
+            lineColor: '#f85149',
+            upLineColor: '#3fb950',
+            color: 'rgba(248, 81, 73, 0.85)',
+            upColor: 'rgba(63, 185, 80, 0.85)',
+            pointPadding: 0.15
+          }
+        },
+
+        series: [{
+          type: 'candlestick',
+          name: 'OHLC',
+          data: ohlcData,
+          zIndex: 2
+        }, {
+          type: 'scatter',
+          name: 'Swaps',
+          data: swapData,
+          marker: {
+            radius: 1.5,
+            fillColor: 'rgba(139, 148, 158, 0.25)',
+            symbol: 'circle'
+          },
+          zIndex: 1,
+          enableMouseTracking: false,
+          showInLegend: false
+        }, {
+          type: 'line',
+          name: 'VWAP',
+          data: vwapData,
+          color: '#f0883e',
+          lineWidth: 2,
+          marker: { enabled: false },
+          zIndex: 3
+        }],
+
+        exporting: {
+          enabled: true,
+          buttons: {
+            contextButton: {
+              theme: { fill: 'transparent', stroke: 'rgba(48, 54, 61, 0.6)' },
+              symbolStroke: '#7d8590'
+            }
+          }
+        }
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', render);
+  </script>
+</body>
+</html>

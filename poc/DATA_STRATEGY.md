@@ -305,6 +305,15 @@ Output files:
 - `poc/data/ohlc.json` - Aggregated candles
 - `poc/data/results.json` - Analysis results
 
+### Visualize the Data
+
+Open `poc/viewer.html` in a browser to see:
+- OHLC candlestick chart
+- Individual swap prices (scatter)
+- VWAP line overlay
+- Recommended 90% range band
+- Current price marker
+
 ## Next Steps
 
 1. [x] Test RPC endpoints (PublicNode works)

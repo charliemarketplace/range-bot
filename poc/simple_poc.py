@@ -1,16 +1,20 @@
 """
 Simple POC: Fetch Uniswap v3 swaps, store locally, analyze with Bayesian model.
+5-minute OHLC candles with proper timestamps.
 """
 import requests
 import json
 import math
 import statistics
+import time
 from pathlib import Path
+from datetime import datetime
 
 RPC = "https://ethereum-rpc.publicnode.com"
 POOL = "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"  # ETH/USDC 0.05%
 SWAP_TOPIC = "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67"
 DATA_DIR = Path(__file__).parent / "data"
+CANDLE_MINUTES = 5
 
 
 def rpc(method: str, params: list) -> dict:
@@ -22,6 +26,12 @@ def get_block() -> int:
     return int(rpc("eth_blockNumber", [])["result"], 16)
 
 
+def get_block_timestamp(block: int) -> int:
+    """Get timestamp for a block."""
+    result = rpc("eth_getBlockByNumber", [hex(block), False])
+    return int(result["result"]["timestamp"], 16)
+
+
 def get_logs(from_block: int, to_block: int) -> list:
     return rpc("eth_getLogs", [{
         "address": POOL,
@@ -31,19 +41,19 @@ def get_logs(from_block: int, to_block: int) -> list:
     }])["result"]
 
 
-def decode_swap(log: dict) -> dict:
+def decode_swap(log: dict, block_times: dict) -> dict:
     data = log["data"][2:]
+    block = int(log["blockNumber"], 16)
 
     def int256(h): v = int(h, 16); return v - 2**256 if v >= 2**255 else v
     def int24(h): v = int(h, 16); return v - 2**24 if v >= 2**23 else v
 
     sqrt_price = int(data[128:192], 16)
-    # Pool has USDC=token0 (6 dec), WETH=token1 (18 dec)
-    # price_raw = token1/token0 in base units, invert for USDC/ETH
     price = 1e12 / ((sqrt_price ** 2) / (2 ** 192))
 
     return {
-        "block": int(log["blockNumber"], 16),
+        "block": block,
+        "timestamp": block_times.get(block, 0),
         "tx": log["transactionHash"],
         "amount0": int256(data[0:64]),
         "amount1": int256(data[64:128]),
@@ -55,41 +65,75 @@ def decode_swap(log: dict) -> dict:
 
 
 def fetch_swaps(num_blocks: int = 1000) -> list:
-    """Fetch swaps from last N blocks."""
+    """Fetch swaps from last N blocks with timestamps."""
     end = get_block()
     start = end - num_blocks
+
+    # Get block timestamps for range
+    print("  Fetching block timestamps...")
+    block_times = {}
+    # Sample timestamps at intervals and interpolate (faster than fetching all)
+    sample_blocks = [start, start + num_blocks//4, start + num_blocks//2,
+                     start + 3*num_blocks//4, end]
+    for b in sample_blocks:
+        block_times[b] = get_block_timestamp(b)
+
+    # Interpolate timestamps (~12s per block on average)
+    start_time = block_times[start]
+    end_time = block_times[end]
+    time_per_block = (end_time - start_time) / num_blocks
 
     swaps = []
     for i in range(start, end, 500):
         logs = get_logs(i, min(i + 499, end))
-        swaps.extend(decode_swap(log) for log in logs)
+        for log in logs:
+            block = int(log["blockNumber"], 16)
+            # Interpolate timestamp
+            block_times[block] = int(start_time + (block - start) * time_per_block)
+        swaps.extend(decode_swap(log, block_times) for log in logs)
         print(f"  {i}-{min(i+499, end)}: {len(logs)} swaps")
 
-    return sorted(swaps, key=lambda s: s["block"])
+    return sorted(swaps, key=lambda s: s["timestamp"])
 
 
-def to_ohlc(swaps: list, blocks: int = 100) -> list:
-    """Aggregate swaps to OHLC candles."""
+def to_ohlc(swaps: list, minutes: int = 5) -> list:
+    """Aggregate swaps to OHLC candles by time period."""
     if not swaps:
         return []
 
+    period_sec = minutes * 60
     candles = []
-    min_b, max_b = swaps[0]["block"], swaps[-1]["block"]
 
-    for b in range(min_b, max_b + 1, blocks):
-        ps = [s for s in swaps if b <= s["block"] < b + blocks]
-        if not ps:
-            continue
+    # Group by time period
+    min_ts = swaps[0]["timestamp"]
+    max_ts = swaps[-1]["timestamp"]
 
-        prices = [s["price"] for s in ps]
-        vols = [abs(s["amount0"]) / 1e18 for s in ps]
-        vwap = sum(p*v for p,v in zip(prices, vols)) / sum(vols) if sum(vols) > 0 else prices[-1]
+    # Align to period boundaries
+    period_start = (min_ts // period_sec) * period_sec
 
-        candles.append({
-            "block": b,
-            "o": prices[0], "h": max(prices), "l": min(prices), "c": prices[-1],
-            "vol": sum(vols), "vwap": vwap, "n": len(ps)
-        })
+    while period_start <= max_ts:
+        period_end = period_start + period_sec
+        ps = [s for s in swaps if period_start <= s["timestamp"] < period_end]
+
+        if ps:
+            prices = [s["price"] for s in ps]
+            vols = [abs(s["amount0"]) / 1e6 for s in ps]  # USDC has 6 decimals
+            total_vol = sum(vols)
+            vwap = sum(p*v for p,v in zip(prices, vols)) / total_vol if total_vol > 0 else prices[-1]
+
+            candles.append({
+                "timestamp": period_start * 1000,  # JS milliseconds
+                "time_str": datetime.utcfromtimestamp(period_start).strftime("%H:%M"),
+                "o": prices[0],
+                "h": max(prices),
+                "l": min(prices),
+                "c": prices[-1],
+                "vol": total_vol,
+                "vwap": vwap,
+                "n": len(ps)
+            })
+
+        period_start = period_end
 
     return candles
 
@@ -105,12 +149,13 @@ def laplace_dist(center: float, scale: float, n: int = 101) -> tuple:
 
 def likelihood_dist(candles: list, n: int = 101) -> tuple:
     """Build likelihood from OHLC."""
-    lo, hi = min(c["l"] for c in candles) * 0.995, max(c["h"] for c in candles) * 1.005
+    lo = min(c["l"] for c in candles) * 0.995
+    hi = max(c["h"] for c in candles) * 1.005
     prices = [lo + (hi-lo) * i / (n-1) for i in range(n)]
     probs = [0.0] * n
 
     for idx, c in enumerate(candles):
-        w = 0.9 ** (len(candles) - 1 - idx)
+        w = 0.9 ** (len(candles) - 1 - idx)  # Decay older candles
         for i, p in enumerate(prices):
             if c["l"] <= p <= c["h"]:
                 probs[i] += w
@@ -169,14 +214,21 @@ def main():
         json.dump(swaps, f)
     print(f"Saved to {DATA_DIR / 'swaps.json'}")
 
-    # 2. Build OHLC
-    candles = to_ohlc(swaps, 100)
+    # 2. Build 5-min OHLC
+    candles = to_ohlc(swaps, CANDLE_MINUTES)
     with open(DATA_DIR / "ohlc.json", "w") as f:
         json.dump(candles, f)
-    print(f"Built {len(candles)} candles -> {DATA_DIR / 'ohlc.json'}")
 
-    # 3. VWAP prior
-    vwaps = [c["vwap"] for c in candles[-10:]]
+    time_range = ""
+    if candles:
+        t0 = datetime.utcfromtimestamp(candles[0]["timestamp"] / 1000).strftime("%H:%M")
+        t1 = datetime.utcfromtimestamp(candles[-1]["timestamp"] / 1000).strftime("%H:%M")
+        time_range = f" ({t0} - {t1} UTC)"
+    print(f"Built {len(candles)} x {CANDLE_MINUTES}min candles{time_range}")
+
+    # 3. VWAP prior (use last 10 candles = 50 min)
+    recent = candles[-10:] if len(candles) >= 10 else candles
+    vwaps = [c["vwap"] for c in recent]
     median_vwap = statistics.median(vwaps)
     std = statistics.stdev(vwaps) if len(vwaps) > 1 else median_vwap * 0.01
 
@@ -184,7 +236,7 @@ def main():
     print(f"Prior: center=${median_vwap:,.2f}, scale=${std*2:,.2f}")
 
     # 4. Likelihood
-    lik_prices, lik_probs = likelihood_dist(candles[-10:])
+    lik_prices, lik_probs = likelihood_dist(recent)
 
     # 5. Posterior
     post_prices, post_probs = bayesian_update(prior_prices, prior_probs, lik_prices, lik_probs)
@@ -200,12 +252,16 @@ def main():
     print(f"Current: ${current:,.2f} {'[IN]' if in_range else '[OUT]'}")
 
     # Save results
+    last_ts = swaps[-1]["timestamp"]
     results = {
         "median_vwap": median_vwap,
         "posterior_ev": ev,
         "range": rec,
         "current_price": current,
-        "in_range": in_range
+        "current_timestamp": last_ts * 1000,
+        "forecast_end": (last_ts + CANDLE_MINUTES * 60) * 1000,
+        "in_range": in_range,
+        "candle_minutes": CANDLE_MINUTES
     }
     with open(DATA_DIR / "results.json", "w") as f:
         json.dump(results, f, indent=2)
