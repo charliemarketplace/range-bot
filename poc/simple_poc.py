@@ -117,7 +117,7 @@ def to_ohlc(swaps: list, minutes: int = 5) -> list:
 
         if ps:
             prices = [s["price"] for s in ps]
-            vols = [abs(s["amount0"]) / 1e6 for s in ps]  # USDC has 6 decimals
+            vols = [abs(s["amount1"]) / 1e6 for s in ps]  # USDC is token1, 6 decimals
             total_vol = sum(vols)
             vwap = sum(p*v for p,v in zip(prices, vols)) / total_vol if total_vol > 0 else prices[-1]
 

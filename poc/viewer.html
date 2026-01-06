@@ -512,7 +512,7 @@ Result: <span style="color:#58a6ff" id="calcRange">$3,145.42 - $3,151.78</span> 
 
         if (ps.length) {
           const prices = ps.map(s => s.price);
-          const vols = ps.map(s => Math.abs(s.amount0) / 1e6);
+          const vols = ps.map(s => Math.abs(s.amount1) / 1e6);  // USDC is token1, 6 decimals
           const totalVol = vols.reduce((a, b) => a + b, 0);
           const vwap = totalVol > 0 ? prices.reduce((sum, p, i) => sum + p * vols[i], 0) / totalVol : prices[prices.length - 1];
 
@@ -1080,12 +1080,17 @@ Result: <span style="color:#58a6ff" id="calcRange">$3,145.42 - $3,151.78</span> 
           name: 'Swaps',
           data: swapData,
           marker: {
-            radius: 1.5,
-            fillColor: 'rgba(139, 148, 158, 0.25)',
+            radius: 3.5,
+            fillColor: 'rgba(139, 148, 158, 0.6)',
+            lineColor: 'rgba(139, 148, 158, 0.8)',
+            lineWidth: 1,
             symbol: 'circle'
           },
           zIndex: 1,
-          enableMouseTracking: false,
+          enableMouseTracking: true,
+          tooltip: {
+            pointFormat: '<span style="color:#7d8590">Swap:</span> ${point.y:.2f}'
+          },
           showInLegend: false
         }, {
           type: 'line',
