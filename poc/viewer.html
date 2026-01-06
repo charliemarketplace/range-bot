@@ -83,7 +83,78 @@
       border-bottom: 1px solid rgba(48, 54, 61, 0.4);
     }
     .chart-title { font-size: 0.85rem; font-weight: 600; color: #e6edf3; }
+    .refresh-btn {
+      background: rgba(88, 166, 255, 0.1);
+      border: 1px solid rgba(88, 166, 255, 0.3);
+      color: #58a6ff;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    .refresh-btn:hover { background: rgba(88, 166, 255, 0.2); }
+    .refresh-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .refresh-btn .spinner {
+      width: 12px;
+      height: 12px;
+      border: 2px solid rgba(88, 166, 255, 0.3);
+      border-top-color: #58a6ff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      display: none;
+    }
+    .refresh-btn.loading .spinner { display: block; }
+    .refresh-btn.loading .icon { display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .chart-hint { font-size: 0.7rem; color: #7d8590; }
+
+    /* Method Toggle */
+    .method-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(22, 27, 34, 0.8);
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid rgba(48, 54, 61, 0.6);
+    }
+    .method-toggle label {
+      font-size: 0.7rem;
+      color: #7d8590;
+      cursor: pointer;
+      padding: 4px 10px;
+      border-radius: 4px;
+      transition: all 0.2s;
+    }
+    .method-toggle input[type="radio"] { display: none; }
+    .method-toggle input[type="radio"]:checked + label {
+      background: rgba(88, 166, 255, 0.2);
+      color: #58a6ff;
+    }
+    .method-toggle label:hover {
+      background: rgba(88, 166, 255, 0.1);
+    }
+    .method-indicator {
+      font-size: 0.65rem;
+      padding: 2px 6px;
+      border-radius: 3px;
+      margin-left: 4px;
+    }
+    .method-indicator.custom {
+      background: rgba(240, 136, 62, 0.2);
+      color: #f0883e;
+    }
+    .method-indicator.kde {
+      background: rgba(136, 87, 255, 0.2);
+      color: #a371f7;
+    }
     .method-box {
       background: rgba(22, 27, 34, 0.6);
       border: 1px solid rgba(48, 54, 61, 0.6);
@@ -171,6 +242,19 @@
       <div class="subtitle">Uniswap v3 | Ethereum Mainnet | 1 block ~ 12 seconds</div>
     </div>
 
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+      <div class="method-toggle">
+        <span style="font-size: 0.7rem; color: #7d8590;">Likelihood:</span>
+        <input type="radio" name="method" id="methodCustom" value="custom" checked>
+        <label for="methodCustom">Custom OHLC</label>
+        <input type="radio" name="method" id="methodKDE" value="kde">
+        <label for="methodKDE">Range-aware KDE</label>
+      </div>
+      <div id="methodStats" style="font-size: 0.7rem; color: #7d8590;">
+        Width: <span id="rangeWidth">-</span> | Entropy: <span id="rangeEntropy">-</span>
+      </div>
+    </div>
+
     <div class="stats">
       <div class="stat">
         <div class="stat-label">Current Price</div>
@@ -181,7 +265,7 @@
         <div class="stat-value" id="vwap">-</div>
       </div>
       <div class="stat">
-        <div class="stat-label">Optimal Range (90%)</div>
+        <div class="stat-label">Optimal Range (90%)<span class="method-indicator custom" id="methodBadge">CUSTOM</span></div>
         <div class="stat-value highlight" id="range">-</div>
       </div>
       <div class="stat">
@@ -218,25 +302,105 @@
     <div id="chart-wrapper">
       <div class="chart-controls">
         <div class="chart-title">Price Action & Bayesian Range</div>
-        <div class="chart-hint">Drag to zoom | Shift+drag to pan | Double-click to reset</div>
+        <div style="display: flex; align-items: center; gap: 16px;">
+          <div class="chart-hint">Drag to zoom | Shift+drag to pan | Double-click to reset</div>
+          <button class="refresh-btn" id="refreshBtn" onclick="refreshData()">
+            <span class="spinner"></span>
+            <span class="icon">↻</span>
+            Refresh (1000 blocks)
+          </button>
+        </div>
       </div>
       <div id="chart"></div>
     </div>
 
     <div class="method-box">
-      <div class="method-title">Bayesian Update Method</div>
+      <div class="method-title">Bayesian Update Method — With Real Numbers</div>
       <div class="method-content">
-        <strong>1. Prior Distribution:</strong> Laplace distribution centered on the rolling median VWAP (last 10 candles = 50 min).
-        Scale parameter = 2x standard deviation of VWAP values. Research shows price revisits VWAP 90%+ of the time within ~1000 blocks.<br><br>
+        <strong>Step 1: Collect VWAP from Recent Candles</strong><br>
+        Using last 10 candles (50 min), compute VWAP per candle:<br>
+        <code style="display:block;margin:8px 0;padding:8px;background:rgba(0,0,0,0.3);font-size:0.7rem;line-height:1.5">
+VWAP = Σ(price × volume) / Σ(volume)
 
-        <strong>2. Likelihood Function:</strong> Built from OHLC candles. For each price point, probability is weighted sum of candles where <code>low &lt;= price &lt;= high</code>.
-        Recent candles weighted higher (decay factor 0.9 per candle).<br><br>
+Candle VWAPs: [3147.30, 3148.56, 3148.46, 3147.62, 3146.43, 3145.45, 3148.56, 3152.07, 3151.57, ...]
+Median VWAP = <span id="calcVwap">$3,148.04</span>
+Std Dev = <span id="calcStd">$2.15</span></code>
 
-        <strong>3. Posterior:</strong> Element-wise multiplication of prior and likelihood, then normalize.
-        <div class="formula">P(price | data) &prop; P(price) &times; L(data | price)</div>
+        <strong>Step 2: Build Prior (Laplace Distribution)</strong><br>
+        Center on median VWAP, scale = 2 × std. Laplace has fatter tails than Gaussian—better for crypto.<br>
+        <div class="formula" style="text-align:left;font-size:0.7rem">
+P(price) = (1/2b) × exp(-|price - μ| / b)<br>
+where μ = <span id="priorMu">$3,148.04</span>, b = <span id="priorB">$4.30</span>
+        </div>
+        <div style="margin:10px 0;padding:10px;background:rgba(240,136,62,0.1);border-radius:6px;border:1px solid rgba(240,136,62,0.3)">
+          <svg id="priorSvg" viewBox="0 0 400 80" style="width:100%;height:80px">
+            <!-- Prior curve drawn by JS -->
+          </svg>
+          <div style="display:flex;justify-content:space-between;font-size:0.65rem;color:#7d8590;margin-top:4px">
+            <span id="priorLeft">$3,130</span>
+            <span style="color:#f0883e">Prior (belief before seeing data)</span>
+            <span id="priorRight">$3,165</span>
+          </div>
+        </div>
 
-        <strong>4. Optimal Range:</strong> Find the tightest interval covering 90% of posterior probability mass.
-        This becomes the recommended LP tick range for Uniswap v3.
+        <strong>Step 3: Build Likelihood (Where Did Price Actually Go?)</strong>
+        <span class="method-indicator custom" id="likelihoodMethodBadge" style="margin-left: 8px;">CUSTOM</span><br>
+        <div id="likelihoodExplanation">
+        <span id="customExplanation">For each price level, count how many candles touched it. Recent candles weighted higher (0.9 decay).<br>
+        <code style="display:block;margin:8px 0;padding:8px;background:rgba(0,0,0,0.3);font-size:0.7rem">
+L(price) = Σ[ w_i × 1(low_i ≤ price ≤ high_i) ]
+where w_i = 0.9^(n-i)  // newer candles weighted more</code></span>
+        <span id="kdeExplanation" style="display:none">Sample points uniformly from each candle's [low, high] range, then apply Gaussian kernel smoothing.<br>
+        <code style="display:block;margin:8px 0;padding:8px;background:rgba(0,0,0,0.3);font-size:0.7rem">
+L(price) = Σ[ w_i × K((price - sample_i) / h) ]
+where K = Gaussian kernel, h = Silverman bandwidth</code></span>
+        </div>
+        <div style="margin:10px 0;padding:10px;background:rgba(88,166,255,0.1);border-radius:6px;border:1px solid rgba(88,166,255,0.3)">
+          <svg id="likeSvg" viewBox="0 0 400 80" style="width:100%;height:80px">
+            <!-- Likelihood drawn by JS -->
+          </svg>
+          <div style="display:flex;justify-content:space-between;font-size:0.65rem;color:#7d8590;margin-top:4px">
+            <span id="likeLeft">$3,139</span>
+            <span style="color:#58a6ff">Likelihood (evidence from data)</span>
+            <span id="likeRight">$3,153</span>
+          </div>
+        </div>
+
+        <strong>Step 4: Bayes' Rule → Posterior</strong><br>
+        Multiply prior × likelihood, then normalize to sum to 1.<br>
+        <div class="formula">
+Posterior(price) ∝ Prior(price) × Likelihood(price)
+        </div>
+        <div style="margin:10px 0;padding:10px;background:rgba(63,185,80,0.1);border-radius:6px;border:1px solid rgba(63,185,80,0.3)">
+          <svg id="postSvg" viewBox="0 0 400 80" style="width:100%;height:80px">
+            <!-- Posterior drawn by JS -->
+          </svg>
+          <div style="display:flex;justify-content:space-between;font-size:0.65rem;color:#7d8590;margin-top:4px">
+            <span id="postLeft">$3,139</span>
+            <span style="color:#3fb950">Posterior (updated belief)</span>
+            <span id="postRight">$3,153</span>
+          </div>
+        </div>
+
+        <strong>Step 5: Find 90% Credible Interval</strong><br>
+        Sweep through all intervals, find the narrowest one containing ≥90% probability mass.<br>
+        <code style="display:block;margin:8px 0;padding:8px;background:rgba(0,0,0,0.3);font-size:0.7rem">
+for i in all_prices:
+    for j in range(i, len(prices)):
+        if cumsum(probs[i:j+1]) >= 0.90:
+            if (prices[j] - prices[i]) < best_width:
+                best = (i, j)
+
+Result: <span style="color:#58a6ff" id="calcRange">$3,145.42 - $3,151.78</span> (width: <span id="calcWidth">$6.35</span>)</code>
+
+        <div style="margin-top:12px;padding:10px;background:rgba(88,166,255,0.05);border-radius:6px">
+          <strong style="color:#58a6ff">Why This Works for LP:</strong><br>
+          <span style="font-size:0.75rem;color:#c9d1d9">
+          The 90% interval tells us: "We're 90% confident price stays here."<br>
+          → Place LP ticks at these bounds to maximize fee capture while minimizing impermanent loss.<br>
+          → Tighter range = more fees per $ but higher rebalance risk.
+          </span>
+        </div>
       </div>
     </div>
 
@@ -247,6 +411,322 @@
   </div>
 
   <script>
+    // RPC Configuration
+    const RPC = "https://ethereum-rpc.publicnode.com";
+    const POOL = "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640";
+    const SWAP_TOPIC = "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67";
+    const CANDLE_MINUTES = 5;
+
+    // RPC Helper
+    async function rpc(method, params) {
+      const r = await fetch(RPC, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: "2.0", method, params, id: 1 })
+      });
+      return r.json();
+    }
+
+    async function getBlock() {
+      const res = await rpc("eth_blockNumber", []);
+      return parseInt(res.result, 16);
+    }
+
+    async function getBlockTimestamp(block) {
+      const res = await rpc("eth_getBlockByNumber", ["0x" + block.toString(16), false]);
+      return parseInt(res.result.timestamp, 16);
+    }
+
+    async function getLogs(fromBlock, toBlock) {
+      const res = await rpc("eth_getLogs", [{
+        address: POOL,
+        topics: [SWAP_TOPIC],
+        fromBlock: "0x" + fromBlock.toString(16),
+        toBlock: "0x" + toBlock.toString(16)
+      }]);
+      return res.result || [];
+    }
+
+    function decodeSwap(log, blockTimes) {
+      const data = log.data.slice(2);
+      const block = parseInt(log.blockNumber, 16);
+
+      const int256 = (h) => { const v = BigInt("0x" + h); return v >= BigInt("0x8000000000000000000000000000000000000000000000000000000000000000") ? v - BigInt("0x10000000000000000000000000000000000000000000000000000000000000000") : v; };
+      const int24 = (h) => { const v = parseInt(h, 16); return v >= 0x800000 ? v - 0x1000000 : v; };
+
+      const sqrtPrice = BigInt("0x" + data.slice(128, 192));
+      const price = 1e12 / (Number(sqrtPrice * sqrtPrice / BigInt(2**192)));
+
+      return {
+        block,
+        timestamp: blockTimes[block] || 0,
+        tx: log.transactionHash,
+        amount0: Number(int256(data.slice(0, 64))),
+        amount1: Number(int256(data.slice(64, 128))),
+        sqrt_price: Number(sqrtPrice),
+        liquidity: parseInt(data.slice(192, 256), 16),
+        tick: int24(data.slice(256, 320)),
+        price
+      };
+    }
+
+    async function fetchSwaps(numBlocks = 1000, onProgress) {
+      const end = await getBlock();
+      const start = end - numBlocks;
+
+      onProgress?.(`Fetching timestamps...`);
+      const startTime = await getBlockTimestamp(start);
+      const endTime = await getBlockTimestamp(end);
+      const timePerBlock = (endTime - startTime) / numBlocks;
+
+      const blockTimes = { [start]: startTime, [end]: endTime };
+      const swaps = [];
+
+      for (let i = start; i < end; i += 500) {
+        const to = Math.min(i + 499, end);
+        onProgress?.(`Fetching blocks ${i}-${to}...`);
+
+        const logs = await getLogs(i, to);
+        for (const log of logs) {
+          const block = parseInt(log.blockNumber, 16);
+          blockTimes[block] = Math.floor(startTime + (block - start) * timePerBlock);
+        }
+        swaps.push(...logs.map(log => decodeSwap(log, blockTimes)));
+      }
+
+      return swaps.sort((a, b) => a.timestamp - b.timestamp);
+    }
+
+    function toOHLC(swaps, minutes = 5) {
+      if (!swaps.length) return [];
+      const periodSec = minutes * 60;
+      const candles = [];
+
+      const minTs = swaps[0].timestamp;
+      const maxTs = swaps[swaps.length - 1].timestamp;
+      let periodStart = Math.floor(minTs / periodSec) * periodSec;
+
+      while (periodStart <= maxTs) {
+        const periodEnd = periodStart + periodSec;
+        const ps = swaps.filter(s => s.timestamp >= periodStart && s.timestamp < periodEnd);
+
+        if (ps.length) {
+          const prices = ps.map(s => s.price);
+          const vols = ps.map(s => Math.abs(s.amount0) / 1e6);
+          const totalVol = vols.reduce((a, b) => a + b, 0);
+          const vwap = totalVol > 0 ? prices.reduce((sum, p, i) => sum + p * vols[i], 0) / totalVol : prices[prices.length - 1];
+
+          candles.push({
+            timestamp: periodStart * 1000,
+            time_str: new Date(periodStart * 1000).toISOString().slice(11, 16),
+            o: prices[0],
+            h: Math.max(...prices),
+            l: Math.min(...prices),
+            c: prices[prices.length - 1],
+            vol: totalVol,
+            vwap,
+            n: ps.length
+          });
+        }
+        periodStart = periodEnd;
+      }
+      return candles;
+    }
+
+    function laplaceDist(center, scale, n = 101) {
+      const half = scale * 4;
+      const prices = Array.from({ length: n }, (_, i) => center - half + (2 * half) * i / (n - 1));
+      const probs = prices.map(p => Math.exp(-Math.abs(p - center) / scale) / (2 * scale));
+      const total = probs.reduce((a, b) => a + b, 0);
+      return { prices, probs: probs.map(p => p / total) };
+    }
+
+    // Current likelihood method (toggled by user)
+    let currentMethod = 'custom';
+
+    function likelihoodDist(candles, n = 101) {
+      return currentMethod === 'kde'
+        ? likelihoodKDE(candles, n)
+        : likelihoodCustom(candles, n);
+    }
+
+    function likelihoodCustom(candles, n = 101) {
+      const lo = Math.min(...candles.map(c => c.l)) * 0.995;
+      const hi = Math.max(...candles.map(c => c.h)) * 1.005;
+      const prices = Array.from({ length: n }, (_, i) => lo + (hi - lo) * i / (n - 1));
+      const probs = new Array(n).fill(0);
+
+      candles.forEach((c, idx) => {
+        const w = Math.pow(0.9, candles.length - 1 - idx);
+        prices.forEach((p, i) => {
+          if (c.l <= p && p <= c.h) probs[i] += w;
+        });
+      });
+
+      const total = probs.reduce((a, b) => a + b, 0);
+      return { prices, probs: total > 0 ? probs.map(p => p / total) : probs.map(() => 1 / n) };
+    }
+
+    function likelihoodKDE(candles, n = 101, samplesPerCandle = 20) {
+      // Collect weighted samples from each candle's range
+      const points = [];
+      const weights = [];
+
+      candles.forEach((c, idx) => {
+        const w = Math.pow(0.9, candles.length - 1 - idx);
+        // Sample uniformly across the candle's range
+        for (let i = 0; i < samplesPerCandle; i++) {
+          const t = i / (samplesPerCandle - 1);
+          points.push(c.l + t * (c.h - c.l));
+          weights.push(w);
+        }
+      });
+
+      // Define evaluation grid
+      const lo = Math.min(...candles.map(c => c.l)) * 0.995;
+      const hi = Math.max(...candles.map(c => c.h)) * 1.005;
+      const prices = Array.from({ length: n }, (_, i) => lo + (hi - lo) * i / (n - 1));
+
+      // Silverman's rule for bandwidth
+      const mean = points.reduce((a, b) => a + b, 0) / points.length;
+      const variance = points.reduce((sum, p) => sum + (p - mean) ** 2, 0) / points.length;
+      const stdDev = Math.sqrt(variance);
+      const bandwidth = 1.06 * stdDev * Math.pow(points.length, -1/5);
+
+      // Evaluate KDE at each price point
+      const probs = prices.map(x => {
+        let density = 0;
+        for (let i = 0; i < points.length; i++) {
+          // Gaussian kernel
+          const z = (x - points[i]) / bandwidth;
+          density += weights[i] * Math.exp(-0.5 * z * z);
+        }
+        return density;
+      });
+
+      const total = probs.reduce((a, b) => a + b, 0);
+      return { prices, probs: total > 0 ? probs.map(p => p / total) : probs.map(() => 1 / n) };
+    }
+
+    function bayesianUpdate(priorPrices, priorProbs, likPrices, likProbs) {
+      const interp = (prices, probs, target) => {
+        for (let i = 0; i < prices.length - 1; i++) {
+          if (prices[i] <= target && target <= prices[i + 1]) {
+            const t = (target - prices[i]) / (prices[i + 1] - prices[i]);
+            return (1 - t) * probs[i] + t * probs[i + 1];
+          }
+        }
+        return target < prices[0] ? probs[0] : probs[probs.length - 1];
+      };
+
+      const post = priorPrices.map((pr, i) => priorProbs[i] * interp(likPrices, likProbs, pr));
+      const total = post.reduce((a, b) => a + b, 0);
+      return { prices: priorPrices, probs: total > 0 ? post.map(p => p / total) : priorProbs };
+    }
+
+    function optimalRange(prices, probs, coverage = 0.9) {
+      let best = null;
+      for (let i = 0; i < prices.length; i++) {
+        let cumsum = 0;
+        for (let j = i; j < prices.length; j++) {
+          cumsum += probs[j];
+          if (cumsum >= coverage) {
+            const width = prices[j] - prices[i];
+            if (!best || width < best.width) {
+              best = { i, j, width, cumsum };
+            }
+            break;
+          }
+        }
+      }
+      if (!best) return { lower: prices[0], upper: prices[prices.length - 1], coverage: 1.0 };
+      return { lower: prices[best.i], upper: prices[best.j], coverage: best.cumsum };
+    }
+
+    function median(arr) {
+      const sorted = [...arr].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    }
+
+    function std(arr) {
+      const m = arr.reduce((a, b) => a + b, 0) / arr.length;
+      return Math.sqrt(arr.reduce((sum, v) => sum + (v - m) ** 2, 0) / arr.length);
+    }
+
+    function entropy(probs) {
+      return -probs.filter(p => p > 0).reduce((sum, p) => sum + p * Math.log(p), 0);
+    }
+
+    // Global state for re-rendering on method toggle
+    let globalData = null;
+
+    function runAnalysis(swaps, candles) {
+      const recent = candles.slice(-10);
+      const vwaps = recent.map(c => c.vwap);
+      const medianVwap = median(vwaps);
+      const stdDev = vwaps.length > 1 ? std(vwaps) : medianVwap * 0.01;
+
+      const prior = laplaceDist(medianVwap, stdDev * 2);
+      const likelihood = likelihoodDist(recent);
+      const posterior = bayesianUpdate(prior.prices, prior.probs, likelihood.prices, likelihood.probs);
+      const ev = posterior.prices.reduce((sum, p, i) => sum + p * posterior.probs[i], 0);
+      const range = optimalRange(posterior.prices, posterior.probs, 0.9);
+
+      const current = swaps[swaps.length - 1].price;
+      const lastTs = swaps[swaps.length - 1].timestamp;
+
+      // Compute entropy for comparison
+      const posteriorEntropy = entropy(posterior.probs);
+      const rangeWidth = range.upper - range.lower;
+
+      return {
+        median_vwap: medianVwap,
+        posterior_ev: ev,
+        range,
+        range_width: rangeWidth,
+        entropy: posteriorEntropy,
+        current_price: current,
+        current_timestamp: lastTs * 1000,
+        forecast_end: (lastTs + CANDLE_MINUTES * 60) * 1000,
+        in_range: range.lower <= current && current <= range.upper,
+        candle_minutes: CANDLE_MINUTES,
+        method: currentMethod
+      };
+    }
+
+    // Refresh data from RPC
+    async function refreshData() {
+      const btn = document.getElementById('refreshBtn');
+      btn.disabled = true;
+      btn.classList.add('loading');
+
+      try {
+        const swaps = await fetchSwaps(1000, (msg) => {
+          btn.querySelector('.icon').textContent = msg.includes('Fetching blocks') ? msg.split(' ')[2] : '↻';
+        });
+
+        if (swaps.length === 0) {
+          alert('No swaps found in the last 1000 blocks');
+          return;
+        }
+
+        const ohlc = toOHLC(swaps, CANDLE_MINUTES);
+        const results = runAnalysis(swaps, ohlc);
+
+        // Re-render with new data
+        renderWithData({ ohlc, results, swaps });
+
+      } catch (e) {
+        console.error(e);
+        alert('Error fetching data: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.classList.remove('loading');
+        btn.querySelector('.icon').textContent = '↻';
+      }
+    }
+
     async function loadData() {
       try {
         const [ohlc, results, swaps] = await Promise.all([
@@ -270,6 +750,125 @@
       return n.toLocaleString();
     }
 
+    function renderWithData(data) {
+      globalData = data;
+      const { ohlc, swaps } = data;
+      document.getElementById('error').style.display = 'none';
+
+      // Recompute results with current method
+      const results = runAnalysis(swaps, ohlc);
+      renderChartAndStats(ohlc, results, swaps);
+    }
+
+    function onMethodChange(method) {
+      currentMethod = method;
+
+      // Update badges
+      const badge = document.getElementById('methodBadge');
+      badge.textContent = method === 'kde' ? 'KDE' : 'CUSTOM';
+      badge.className = 'method-indicator ' + (method === 'kde' ? 'kde' : 'custom');
+
+      const likeBadge = document.getElementById('likelihoodMethodBadge');
+      likeBadge.textContent = method === 'kde' ? 'KDE' : 'CUSTOM';
+      likeBadge.className = 'method-indicator ' + (method === 'kde' ? 'kde' : 'custom');
+
+      // Toggle explanation text
+      document.getElementById('customExplanation').style.display = method === 'kde' ? 'none' : 'block';
+      document.getElementById('kdeExplanation').style.display = method === 'kde' ? 'block' : 'none';
+
+      // Re-render if we have data
+      if (globalData) {
+        renderWithData(globalData);
+      }
+    }
+
+    function drawBayesianDiagrams(ohlc, results) {
+      const recent = ohlc.slice(-10);
+      if (recent.length < 2) return;
+
+      const vwaps = recent.map(c => c.vwap);
+      const medianVwap = results.median_vwap;
+      const stdDev = std(vwaps);
+      const scale = stdDev * 2;
+
+      // Update text values
+      document.getElementById('calcVwap').textContent = '$' + medianVwap.toFixed(2);
+      document.getElementById('calcStd').textContent = '$' + stdDev.toFixed(2);
+      document.getElementById('priorMu').textContent = '$' + medianVwap.toFixed(2);
+      document.getElementById('priorB').textContent = '$' + scale.toFixed(2);
+      document.getElementById('calcRange').textContent = '$' + results.range.lower.toFixed(2) + ' - $' + results.range.upper.toFixed(2);
+      document.getElementById('calcWidth').textContent = '$' + (results.range.upper - results.range.lower).toFixed(2);
+
+      // Compute distributions
+      const prior = laplaceDist(medianVwap, scale);
+      const likelihood = likelihoodDist(recent);
+      const posterior = bayesianUpdate(prior.prices, prior.probs, likelihood.prices, likelihood.probs);
+
+      // Draw Prior SVG
+      const priorSvg = document.getElementById('priorSvg');
+      drawDistribution(priorSvg, prior.prices, prior.probs, '#f0883e', medianVwap);
+      document.getElementById('priorLeft').textContent = '$' + prior.prices[0].toFixed(0);
+      document.getElementById('priorRight').textContent = '$' + prior.prices[prior.prices.length - 1].toFixed(0);
+
+      // Draw Likelihood SVG (color changes based on method)
+      const likeSvg = document.getElementById('likeSvg');
+      const likeColor = currentMethod === 'kde' ? '#a371f7' : '#58a6ff';
+      drawDistribution(likeSvg, likelihood.prices, likelihood.probs, likeColor, medianVwap);
+      document.getElementById('likeLeft').textContent = '$' + likelihood.prices[0].toFixed(0);
+      document.getElementById('likeRight').textContent = '$' + likelihood.prices[likelihood.prices.length - 1].toFixed(0);
+
+      // Update likelihood container border color
+      const likeContainer = likeSvg.parentElement;
+      likeContainer.style.background = currentMethod === 'kde' ? 'rgba(136, 87, 255, 0.1)' : 'rgba(88, 166, 255, 0.1)';
+      likeContainer.style.borderColor = currentMethod === 'kde' ? 'rgba(136, 87, 255, 0.3)' : 'rgba(88, 166, 255, 0.3)';
+
+      // Draw Posterior SVG with range highlight
+      const postSvg = document.getElementById('postSvg');
+      drawDistribution(postSvg, posterior.prices, posterior.probs, '#3fb950', medianVwap, results.range);
+      document.getElementById('postLeft').textContent = '$' + posterior.prices[0].toFixed(0);
+      document.getElementById('postRight').textContent = '$' + posterior.prices[posterior.prices.length - 1].toFixed(0);
+    }
+
+    function drawDistribution(svg, prices, probs, color, center, range = null) {
+      const width = 400;
+      const height = 80;
+      const padding = 5;
+
+      const minPrice = prices[0];
+      const maxPrice = prices[prices.length - 1];
+      const maxProb = Math.max(...probs);
+
+      const xScale = (p) => padding + (p - minPrice) / (maxPrice - minPrice) * (width - 2 * padding);
+      const yScale = (prob) => height - padding - (prob / maxProb) * (height - 2 * padding);
+
+      // Build path
+      let pathD = `M ${xScale(prices[0])} ${yScale(probs[0])}`;
+      for (let i = 1; i < prices.length; i++) {
+        pathD += ` L ${xScale(prices[i])} ${yScale(probs[i])}`;
+      }
+
+      // Fill area
+      const fillPath = pathD + ` L ${xScale(prices[prices.length - 1])} ${height - padding} L ${xScale(prices[0])} ${height - padding} Z`;
+
+      let html = `<path d="${fillPath}" fill="${color}" fill-opacity="0.2" />`;
+      html += `<path d="${pathD}" fill="none" stroke="${color}" stroke-width="2" />`;
+
+      // Draw 90% range highlight if provided
+      if (range) {
+        const x1 = xScale(range.lower);
+        const x2 = xScale(range.upper);
+        html += `<rect x="${x1}" y="${padding}" width="${x2 - x1}" height="${height - 2 * padding}" fill="${color}" fill-opacity="0.15" />`;
+        html += `<line x1="${x1}" y1="${padding}" x2="${x1}" y2="${height - padding}" stroke="${color}" stroke-width="1" stroke-dasharray="3,2" />`;
+        html += `<line x1="${x2}" y1="${padding}" x2="${x2}" y2="${height - padding}" stroke="${color}" stroke-width="1" stroke-dasharray="3,2" />`;
+      }
+
+      // Draw center line
+      const centerX = xScale(center);
+      html += `<line x1="${centerX}" y1="${padding}" x2="${centerX}" y2="${height - padding}" stroke="${color}" stroke-width="1" stroke-opacity="0.5" stroke-dasharray="2,2" />`;
+
+      svg.innerHTML = html;
+    }
+
     async function render() {
       let data;
       try {
@@ -279,17 +878,27 @@
         document.getElementById('error').innerHTML = `
           <strong>Data not loaded</strong><br><br>
           Run: <code>cd poc && python -m http.server 8000</code><br><br>
-          Then open: <a href="http://localhost:8000/viewer.html" style="color:#58a6ff">http://localhost:8000/viewer.html</a>
+          Then open: <a href="http://localhost:8000/viewer.html" style="color:#58a6ff">http://localhost:8000/viewer.html</a><br><br>
+          Or click <strong>Refresh (1000 blocks)</strong> to fetch live data directly.
         `;
         return;
       }
 
-      const { ohlc, results, swaps } = data;
+      renderWithData(data);
+    }
+
+    function renderChartAndStats(ohlc, results, swaps) {
+      // Draw Bayesian explanation diagrams
+      drawBayesianDiagrams(ohlc, results);
 
       // Price stats
       document.getElementById('current').textContent = '$' + results.current_price.toFixed(2);
       document.getElementById('vwap').textContent = '$' + results.median_vwap.toFixed(2);
       document.getElementById('range').textContent = '$' + results.range.lower.toFixed(2) + ' - $' + results.range.upper.toFixed(2);
+
+      // Method stats
+      document.getElementById('rangeWidth').textContent = '$' + results.range_width.toFixed(2);
+      document.getElementById('rangeEntropy').textContent = results.entropy.toFixed(3);
 
       const statusEl = document.getElementById('status');
       statusEl.textContent = results.in_range ? 'IN RANGE' : 'OUT OF RANGE';
@@ -500,7 +1109,18 @@
       });
     }
 
-    document.addEventListener('DOMContentLoaded', render);
+    document.addEventListener('DOMContentLoaded', () => {
+      // Set up method toggle listeners
+      document.getElementById('methodCustom').addEventListener('change', (e) => {
+        if (e.target.checked) onMethodChange('custom');
+      });
+      document.getElementById('methodKDE').addEventListener('change', (e) => {
+        if (e.target.checked) onMethodChange('kde');
+      });
+
+      // Initial render
+      render();
+    });
   </script>
 </body>
 </html>

@@ -86,6 +86,7 @@ See `docs/specs/` for detailed module specifications:
 - [On-chain Pricing Research](https://flipsidecrypto.beehiiv.com/p/onchain-pricing)
 - [onchain-pricing repo](https://github.com/charliemarketplace/onchain-pricing)
 - [Uniswap v3 Whitepaper](https://uniswap.org/whitepaper-v3.pdf)
+- [Uniswap v3 R Package](https://github.com/charliemarketplace/uniswap) - Retroactive LP position optimization in R
 
 ## License
 

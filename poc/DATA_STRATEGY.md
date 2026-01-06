@@ -323,3 +323,26 @@ Open `poc/viewer.html` in a browser to see:
 5. [ ] Set up SQLite schema for persistent storage
 6. [ ] Implement fallback logic
 7. [ ] Add Base chain support
+
+## Retroactive LP Assessment
+
+For retroactive analysis of hypothetical LP positions over historical swaps, see:
+- **R implementation**: [charliemarketplace/uniswap](https://github.com/charliemarketplace/uniswap) - Uniswap v3 math in R for optimal position identification
+
+### Data Requirements for Retroactive Assessment
+
+To calculate fees earned by a hypothetical position across N swaps:
+
+1. **Swap data with tick**: Each swap includes the `tick` at execution
+2. **Position range**: `[tick_lower, tick_upper]` defining the LP position
+3. **Liquidity at position**: Your liquidity vs total liquidity in that tick range
+
+**Fee calculation per swap:**
+```
+if tick_lower <= swap.tick <= tick_upper:
+    fee_amount = swap.volume * fee_tier * (your_liquidity / total_liquidity_in_range)
+else:
+    fee_amount = 0  # Position out of range, no fees earned
+```
+
+The R repo's `ethwbtc_trade_history` dataset demonstrates this structure with complete swap records including tick data.
