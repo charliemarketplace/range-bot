@@ -41,7 +41,40 @@ class EvalPoint:
     range_upper: float
     range_width: float
     median_vwap: float
+    stability_score: float = 0.0
     results: dict = field(default_factory=dict)  # window -> WindowResult
+
+
+# -----------------------------------------------------------------------------
+# Stability Detection
+# -----------------------------------------------------------------------------
+
+def stability_score(candles: list) -> float:
+    """
+    Measure market stability: 0 = trending hard, 1 = perfectly stable.
+
+    Uses path efficiency: ratio of net move to total path length.
+    Stable markets oscillate (high path length, low net move).
+    Trending markets move directionally (path ≈ net move).
+    """
+    if len(candles) < 2:
+        return 1.0
+
+    vwaps = [c["vwap"] for c in candles]
+
+    # Net move: how far did price travel start to end?
+    net_move = abs(vwaps[-1] - vwaps[0])
+
+    # Total path: sum of all movements (measures choppiness)
+    total_path = sum(abs(vwaps[i + 1] - vwaps[i]) for i in range(len(vwaps) - 1))
+
+    if total_path == 0:
+        return 1.0
+
+    # Efficiency: 0 = choppy (stable), 1 = straight line (trending)
+    efficiency = net_move / total_path
+
+    return 1 - efficiency
 
 
 # -----------------------------------------------------------------------------
@@ -281,6 +314,13 @@ def run_backtest(
     swap_coverages = {m: {w: [] for w in windows} for m in methods}
     time_coverages = {m: {w: [] for w in windows} for m in methods}
 
+    # Stability-segmented stats: method -> window -> regime -> [coverages]
+    STABILITY_THRESHOLD = 0.5
+    regimes = ["stable", "trending"]
+    swap_by_regime = {m: {w: {r: [] for r in regimes} for w in windows} for m in methods}
+    time_by_regime = {m: {w: {r: [] for r in regimes} for w in windows} for m in methods}
+    stability_scores = []  # Track all scores for distribution
+
     # Count eval points
     total_points = (end_block - start_block - lookback) // stride
 
@@ -310,6 +350,11 @@ def run_backtest(
         candles = swaps_to_candles(lookback_swaps)
         if len(candles) < 3:
             continue  # Need enough candles
+
+        # 2b. Calculate stability score
+        stab = stability_score(candles[-10:])
+        stability_scores.append(stab)
+        regime = "stable" if stab >= STABILITY_THRESHOLD else "trending"
 
         # 3. Build prior from VWAP
         vwaps = [c["vwap"] for c in candles[-10:]]  # Last 10 candles
@@ -349,6 +394,10 @@ def run_backtest(
                         swap_coverages[method][w].append(result.swap_coverage)
                         time_coverages[method][w].append(result.time_coverage)
 
+                        # Track by regime
+                        swap_by_regime[method][w][regime].append(result.swap_coverage)
+                        time_by_regime[method][w][regime].append(result.time_coverage)
+
                         # Store eval point (only for 90%)
                         if w == windows[0]:  # Avoid duplicates
                             ep = EvalPoint(
@@ -358,13 +407,23 @@ def run_backtest(
                                 range_upper=upper,
                                 range_width=upper - lower,
                                 median_vwap=median_vwap,
+                                stability_score=stab,
                             )
                             eval_points.append(ep)
 
     conn.close()
 
+    # Stability distribution
+    stab_dist = {
+        "mean": statistics.mean(stability_scores) if stability_scores else 0,
+        "std": statistics.stdev(stability_scores) if len(stability_scores) > 1 else 0,
+        "min": min(stability_scores) if stability_scores else 0,
+        "max": max(stability_scores) if stability_scores else 0,
+        "pct_stable": sum(1 for s in stability_scores if s >= STABILITY_THRESHOLD) / len(stability_scores) * 100 if stability_scores else 0,
+    }
+
     # Compute summary statistics
-    summary = {"methods": {}}
+    summary = {"methods": {}, "stability_distribution": stab_dist}
 
     for method in methods:
         summary["methods"][method] = {"windows": {}}
@@ -372,13 +431,29 @@ def run_backtest(
             sc = swap_coverages[method][w]
             tc = time_coverages[method][w]
 
-            summary["methods"][method]["windows"][str(w)] = {
+            # Overall stats
+            window_stats = {
                 "swap_coverage_mean": statistics.mean(sc) if sc else 0,
                 "swap_coverage_std": statistics.stdev(sc) if len(sc) > 1 else 0,
                 "time_coverage_mean": statistics.mean(tc) if tc else 0,
                 "time_coverage_std": statistics.stdev(tc) if len(tc) > 1 else 0,
-                "n_points": len(sc)
+                "n_points": len(sc),
+                "by_regime": {}
             }
+
+            # Stats by regime
+            for regime in regimes:
+                sc_r = swap_by_regime[method][w][regime]
+                tc_r = time_by_regime[method][w][regime]
+                window_stats["by_regime"][regime] = {
+                    "swap_coverage_mean": statistics.mean(sc_r) if sc_r else 0,
+                    "swap_coverage_std": statistics.stdev(sc_r) if len(sc_r) > 1 else 0,
+                    "time_coverage_mean": statistics.mean(tc_r) if tc_r else 0,
+                    "time_coverage_std": statistics.stdev(tc_r) if len(tc_r) > 1 else 0,
+                    "n_points": len(sc_r)
+                }
+
+            summary["methods"][method]["windows"][str(w)] = window_stats
 
     # Calibration curves
     calibration_summary = {}
@@ -411,15 +486,22 @@ def run_backtest(
 
 def print_summary(results: dict):
     """Print formatted summary table."""
-    print("\n" + "=" * 75)
+    print("\n" + "=" * 80)
     print("BACKTEST RESULTS")
-    print("=" * 75)
+    print("=" * 80)
 
     summary = results["summary"]
 
-    # Header
-    print(f"\n{'Method':<10} {'Window':<12} {'Swap Coverage':<18} {'Time Coverage':<18} {'Cal(90%)':<10}")
-    print("-" * 75)
+    # Stability distribution
+    stab = summary.get("stability_distribution", {})
+    print(f"\nStability Score Distribution:")
+    print(f"  Mean: {stab.get('mean', 0):.3f}, Std: {stab.get('std', 0):.3f}")
+    print(f"  Range: [{stab.get('min', 0):.3f}, {stab.get('max', 0):.3f}]")
+    print(f"  Stable periods (>= 0.5): {stab.get('pct_stable', 0):.1f}%")
+
+    # Overall results header
+    print(f"\n{'Method':<10} {'Window':<12} {'Swap Coverage':<18} {'Time Coverage':<18} {'N':<6}")
+    print("-" * 80)
 
     for method, data in summary["methods"].items():
         for window, stats in data["windows"].items():
@@ -427,18 +509,39 @@ def print_summary(results: dict):
             sc_std = stats["swap_coverage_std"] * 100
             tc_mean = stats["time_coverage_mean"] * 100
             tc_std = stats["time_coverage_std"] * 100
-
-            # Get calibration for 90%
-            cal_90 = results["calibration"].get(method, {}).get(f"{window}_blocks", {}).get("90", 0)
+            n = stats["n_points"]
 
             print(f"{method:<10} {window + ' blk':<12} "
                   f"{sc_mean:5.1f}% +/- {sc_std:4.1f}%    "
                   f"{tc_mean:5.1f}% +/- {tc_std:4.1f}%    "
-                  f"{cal_90:5.1f}%")
+                  f"{n:<6}")
 
-    print("\n" + "-" * 75)
-    print("CALIBRATION CURVES")
-    print("-" * 75)
+    # Regime-segmented results
+    print("\n" + "-" * 80)
+    print("RESULTS BY MARKET REGIME (90% CI)")
+    print("-" * 80)
+
+    for regime in ["stable", "trending"]:
+        print(f"\n{regime.upper()} PERIODS:")
+        print(f"{'Method':<10} {'Window':<12} {'Swap Coverage':<18} {'Time Coverage':<18} {'N':<6}")
+
+        for method, data in summary["methods"].items():
+            for window, stats in data["windows"].items():
+                regime_stats = stats.get("by_regime", {}).get(regime, {})
+                sc_mean = regime_stats.get("swap_coverage_mean", 0) * 100
+                sc_std = regime_stats.get("swap_coverage_std", 0) * 100
+                tc_mean = regime_stats.get("time_coverage_mean", 0) * 100
+                tc_std = regime_stats.get("time_coverage_std", 0) * 100
+                n = regime_stats.get("n_points", 0)
+
+                print(f"{method:<10} {window + ' blk':<12} "
+                      f"{sc_mean:5.1f}% +/- {sc_std:4.1f}%    "
+                      f"{tc_mean:5.1f}% +/- {tc_std:4.1f}%    "
+                      f"{n:<6}")
+
+    print("\n" + "-" * 80)
+    print("CALIBRATION CURVES (all periods)")
+    print("-" * 80)
 
     for method in results["calibration"]:
         print(f"\n{method.upper()}:")
