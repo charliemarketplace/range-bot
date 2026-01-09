@@ -157,6 +157,8 @@ This gives:
 
 ## Direction Prediction (Momentum Signal)
 
+> ⚠️ **CAUTION**: This section describes exploratory findings that need additional validation before deployment. See caveats below.
+
 Key finding: **The early warning features don't predict direction, but raw price momentum does.**
 
 ### Analysis Results
@@ -215,13 +217,40 @@ def predict_direction(lookback_swaps):
 5. REENTER: Rebalance and provide liquidity again
 ```
 
-### Why This Works
+### Why This Might Work
 
 Catastrophic epochs are caused by **trending price action** - the model assumes mean-reversion but the market is trending. The 30-min momentum captures which direction the trend is going.
 
 - 50% of catastrophes are UP moves (avg +1.4%)
 - 50% of catastrophes are DOWN moves (avg -1.7%)
 - Momentum correctly predicts direction ~90% of the time
+
+### Caveats (Why This Needs More Validation)
+
+1. **Possible look-ahead bias**: Momentum is measured at t=0, but "catastrophe" is defined by what happens next. If the move has already started, we're detecting, not predicting.
+
+2. **No train/test split**: Unlike the alert thresholds, momentum wasn't validated out-of-sample.
+
+3. **Too good to be true**: 90% accuracy in crypto direction prediction is extraordinary.
+
+4. **Correlation ≠ causation**: The momentum that creates the catastrophe is inherently correlated with direction.
+
+### Recommended Validation Before Use
+
+```python
+# Before trusting momentum for directional bets:
+# 1. Train/test split on momentum thresholds
+# 2. Test on different market regimes (bull/bear/sideways)
+# 3. Measure momentum BEFORE alert triggers, not at trigger time
+# 4. Paper trade with tracking
+```
+
+### Conservative Default
+
+Until validated, the safe response to alerts is:
+- ✅ Withdraw LP (validated)
+- ✅ Go to 50/50 or stables (safe)
+- ❓ Directional bet (unvalidated)
 
 ## Next Steps
 
