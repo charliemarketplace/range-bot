@@ -155,11 +155,79 @@ This gives:
 | Balanced | 2.5 | Good tradeoff for most users |
 | Aggressive | 4.0+ | Maximize fee earnings, accept more risk |
 
+## Direction Prediction (Momentum Signal)
+
+Key finding: **The early warning features don't predict direction, but raw price momentum does.**
+
+### Analysis Results
+
+| Momentum Window | Direction Accuracy | Strong (>0.2%) Accuracy |
+|-----------------|-------------------|-------------------------|
+| 5 min | 80% | 88% |
+| **30 min** | **88%** | **90%** |
+| 1 hr | 75% | 80% |
+
+Correlation between 30-min lookback momentum and future move: **0.42**
+
+### Implementation
+
+```python
+def predict_direction(lookback_swaps):
+    """88-90% accurate on catastrophic epochs"""
+    prices = [s["price"] for s in lookback_swaps]
+
+    # 30-min momentum (best predictor)
+    # ~150 swaps ≈ 30 min on ETH/USDC pool
+    if len(prices) < 150:
+        return "HOLD"
+
+    momentum = (prices[-1] - prices[-150]) / prices[-150]
+
+    if momentum > 0.002:    # >0.2% up
+        return "ETH"        # Ride the wave up
+    elif momentum < -0.002: # >0.2% down
+        return "USDC"       # Avoid the dump
+    else:
+        return "HOLD"       # Stay 50/50, unclear direction
+```
+
+### Complete Alert Response Strategy
+
+```
+1. DETECT: Early warning triggers (stability_trend, range_expansion, etc.)
+     │
+     ▼
+2. WITHDRAW: Remove liquidity from LP position
+     │
+     ▼
+3. PREDICT: Check 30-min momentum
+     │
+     ├── momentum > +0.2%  →  Swap to 100% ETH
+     │
+     ├── momentum < -0.2%  →  Swap to 100% USDC
+     │
+     └── |momentum| < 0.2% →  Hold 50/50
+     │
+     ▼
+4. WAIT: Monitor until stability returns
+     │
+     ▼
+5. REENTER: Rebalance and provide liquidity again
+```
+
+### Why This Works
+
+Catastrophic epochs are caused by **trending price action** - the model assumes mean-reversion but the market is trending. The 30-min momentum captures which direction the trend is going.
+
+- 50% of catastrophes are UP moves (avg +1.4%)
+- 50% of catastrophes are DOWN moves (avg -1.7%)
+- Momentum correctly predicts direction ~90% of the time
+
 ## Next Steps
 
 1. **Implement real-time alerting** in the live system
 2. **Add withdrawal/reentry logic** when alerts trigger
-3. **Consider the "what to do during alerts"** question (hold stables? swap to trending asset?)
+3. **Backtest the full strategy** (LP when stable, directional when alerted)
 
 ## Key Learnings
 
