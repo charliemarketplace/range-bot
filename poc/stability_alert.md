@@ -118,12 +118,47 @@ Two-layer system:
 - `analyze_failures.py` - Feature analysis: hits vs misses
 - `backtest_with_alerts.py` - Train/test split with early warning system
 
+## Threshold Tuning Results
+
+Tested sensitivity multipliers from 0.5 (strict) to 5.0 (lenient):
+
+| Sensitivity | Participation | Mean Coverage | Improvement | Catastrophic |
+|-------------|---------------|---------------|-------------|--------------|
+| 1.0 (strict) | 20.5% | 79.0% | +9.6% | 11.0% |
+| 2.0 | 36.3% | 76.7% | +7.4% | 13.2% |
+| 3.0 | 45.3% | 75.3% | +5.9% | 14.5% |
+| 4.0 | 52.2% | 74.5% | +5.1% | 15.5% |
+| 5.0 (lenient) | 57.8% | 73.9% | +4.5% | 16.0% |
+
+### Recommended: Sensitivity 2.5-3.0
+
+```python
+thresholds = {
+    "stability_trend": -0.13,    # Base * 2.5
+    "range_expansion": 1.24,     # Base + 0.15
+    "price_velocity": 0.37,      # Base * 2.5
+    "vol_spike": 1.76,           # Base * 2.5
+}
+```
+
+This gives:
+- **~40-45% participation** (LP almost half the time)
+- **+6-7% coverage improvement**
+- **14% catastrophic rate** (down from 20%)
+
+### Risk Profiles
+
+| Profile | Sensitivity | Use Case |
+|---------|-------------|----------|
+| Conservative | 1.0 | Maximum protection, accept low participation |
+| Balanced | 2.5 | Good tradeoff for most users |
+| Aggressive | 4.0+ | Maximize fee earnings, accept more risk |
+
 ## Next Steps
 
-1. **Tune alert thresholds** for different risk/reward profiles
-2. **Implement real-time alerting** in the live system
-3. **Add withdrawal/reentry logic** when alerts trigger
-4. **Consider the "what to do during alerts"** question (hold stables? swap to trending asset?)
+1. **Implement real-time alerting** in the live system
+2. **Add withdrawal/reentry logic** when alerts trigger
+3. **Consider the "what to do during alerts"** question (hold stables? swap to trending asset?)
 
 ## Key Learnings
 
