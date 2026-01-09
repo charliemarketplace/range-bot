@@ -130,21 +130,22 @@ Tested sensitivity multipliers from 0.5 (strict) to 5.0 (lenient):
 | 4.0 | 52.2% | 74.5% | +5.1% | 15.5% |
 | 5.0 (lenient) | 57.8% | 73.9% | +4.5% | 16.0% |
 
-### Recommended: Sensitivity 2.5-3.0
+### Selected: Aggressive (Sensitivity 4.0)
 
 ```python
 thresholds = {
-    "stability_trend": -0.13,    # Base * 2.5
-    "range_expansion": 1.24,     # Base + 0.15
-    "price_velocity": 0.37,      # Base * 2.5
-    "vol_spike": 1.76,           # Base * 2.5
+    "stability_trend": -0.21,    # Base * 4.0
+    "range_expansion": 1.39,     # Base + 0.30
+    "price_velocity": 0.59,      # Base * 4.0
+    "vol_spike": 2.81,           # Base * 4.0
 }
 ```
 
 This gives:
-- **~40-45% participation** (LP almost half the time)
-- **+6-7% coverage improvement**
-- **14% catastrophic rate** (down from 20%)
+- **~52% participation** (LP more than half the time)
+- **+5.1% coverage improvement** (74.5% vs 69.4% baseline)
+- **15.5% catastrophic rate** (down from 20.4%)
+- **94.2% median coverage** (up from 87.7%)
 
 ### Risk Profiles
 
